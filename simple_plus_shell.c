@@ -6,36 +6,73 @@
 #include<stdlib.h>
 #include<string.h>
 
+//the max chars a cmd can have.
 #define MAXCHAR 40
+//the max argvs . .   .   have.
 #define MAXARGS  20
 
 //DEBUG MODE
 //#define  DEBUG
 
-void eval (char *cmdline);
+//pass to the execve
+char **g_environ;
+
+//the proc info struct
+typedef struct sim_pcb{
+	pid_t pid;
+	pid_t ppid;
+	//1:the bg proc, 2:the fg proc
+	unsigned short stat;
+	//1:running or 0:sleeping
+	unsigned short running;
+	char name[MAXCHAR];
+	
+	//to be added
+	//short priority;
+
+	struct sim_pcb *next;
+}Pcb;
+
+
+//attention: here return a void * but when using should convert it to a Pcb *
+inline void * Assign_to_Simpcb( pid_t pid, pid_t ppid, unsigned short stat, unsigned short \
+		running, char *name);
+void eval (char *cmdline,struct sim_pcb* pcb);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv);
 void View_Jobs();
 
-char **g_environ;
 
 int main(int argc, char *argv[], char *envp[])
 {
 	g_environ=envp;
 	char cmdline[MAXCHAR];
+	struct sim_pcb *pcb;
+
+	//initialize the head
+	//can be simlified by Assign_to_Simpcb;
+	pcb=(struct sim_pcb*)malloc(sizeof(struct sim_pcb));
+	pcb->pid=getpid();
+	pcb->ppid=0;
+	pcb->stat=1;
+	pcb->running=1;
+	strncpy(pcb->name, "bash", 5);
+	pcb->next=NULL;
+	
 
 	while(1){
 		printf("> ");
 		fgets(cmdline, MAXCHAR, stdin);
 		if(feof(stdin))
 			exit(0);
-		eval(cmdline);
+		eval(cmdline, pcb);
 		printf("\n");
+
 	}
 }
 
 
-void eval (char *cmdline)
+void eval (char *cmdline, struct sim_pcb* pcb)
 {
 	char  *argv[MAXARGS];
 	char buf[MAXCHAR];
@@ -64,14 +101,27 @@ void eval (char *cmdline)
 				printf("%s:cmd not found\n", argv[0]);
 				exit(0);
 			}
+			else
+				exit(1);
 		}
-		if(!bg){
-			int status;
-			if(waitpid(pid, &status, 0)<0)
-				unix_error("waitfg:waitpid error\n");
+		else if(pid>0){
+			//add the proc into the linklist pcb
+			Pcb *new_pcb=Assign_to_Simpcb(pid, getpid(),0, 0, argv[0]);
+			new_pcb->next=pcb->next;
+			pcb->next=new_pcb;
+			if(!bg){
+				int status;
+				if(waitpid(pid, &status, 0)<0)
+					unix_error("waitfg:waitpid error\n");
+				else
+				{
+
+				}
+			}
+			else
+				printf("%d %s", pid, cmdline);
+
 		}
-		else
-			printf("%d %s", pid, cmdline);
 	}
 	return;
 }
@@ -103,7 +153,8 @@ int parseline(char *buf, char **argv)
 		buf++;
 	argc =0;
 	while((delim=strchr(buf, ' ')))
-	{
+ 	{
+
 		argv[argc++]=buf;
 		*delim='\0';
 		buf=delim +1;
@@ -120,3 +171,17 @@ int parseline(char *buf, char **argv)
 }
 
 
+inline void * Assign_to_Simpcb( pid_t pid, pid_t ppid, unsigned short stat, unsigned short \
+		running, char *name)
+{
+	Pcb * pcb;
+	pcb=(struct sim_pcb*)malloc(sizeof(struct sim_pcb));
+	pcb->pid=pid;
+	pcb->ppid=ppid;
+	pcb->stat=stat;
+	pcb->running=running;
+	strncpy(pcb->name,name, 5);
+	pcb->next=NULL;
+	return (void*)pcb;
+	
+}
