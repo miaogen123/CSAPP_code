@@ -15,7 +15,7 @@
 #define MAXARGS  20
 
 //DEBUG MODE
-#define  DEBUG
+//#define  DEBUG
 
 
 
@@ -25,7 +25,7 @@ typedef struct sim_pcb{
 	pid_t ppid;
 	//1:the bg proc, 2:the fg proc
 	unsigned short stat;
-	//1:running or 0:sleeping
+	//1:running or 0:sleeping(stop) 2:end
 	unsigned short running;
 	char name[MAXCHAR];
 	
@@ -35,16 +35,24 @@ typedef struct sim_pcb{
 	struct sim_pcb *next;
 }Pcb;
 
+//signal handler
+typedef void (*sighandler)(int);
+
+
+
 //pass to the execve
 char **g_environ;
 Pcb *g_pcb;
 
-//signal handler
-typedef void (*sighandler)(int);
 
 #ifdef DEBUG
 void test_handler(int signum);
 #endif
+
+//to override a part of signals
+void SIGCHLD_handler(int signum);
+void SIGTSTP_handler(int signum);
+void SIGINT_handler(int signum);
 
 //attention: here return a void * but when using should convert it to a Pcb *
 inline void * Assign_to_Simpcb( pid_t pid, pid_t ppid, unsigned short stat, unsigned short \
@@ -53,6 +61,8 @@ void eval (char *cmdline,struct sim_pcb* pcb);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv);
 void View_Jobs();
+void Put_Proc_Front(char *pid);
+void Put_Proc_Back(char *pid);
 
 
 int main(int argc, char *argv[], char *envp[])
@@ -72,7 +82,14 @@ int main(int argc, char *argv[], char *envp[])
 	pcb->next=NULL;
 	g_pcb=pcb;
 	
-	if(signal(SIGTSTP,test_handler)==SIG_ERR)
+#ifdef DEBUG
+if(signal(SIGTSTP,test_handler)==SIG_ERR)
+		unix_error("signal error");
+#endif
+
+	if(signal(SIGTSTP,SIGTSTP_handler)==SIG_ERR)
+		unix_error("signal error");
+	if(signal(SIGINT,SIGINT_handler)==SIG_ERR)
 		unix_error("signal error");
 
 	while(1){
@@ -136,7 +153,8 @@ void eval (char *cmdline, struct sim_pcb* pcb)
 				}
 			}
 			else{
-				pcb->next->stat=1;
+				pcb->next->stat=0;
+				pcb->next->running =1;
 				printf("%d %s", pid, cmdline);
 			}
 
@@ -152,13 +170,20 @@ int builtin_command(char **argv)
 		return 1;
 	if(!strcmp(argv[0], "jobs"))
 	{
-		//View_Jobs();
+		View_Jobs();
 		return 1;
 	}
 	if(!strcmp(argv[0], "bg"))
 	{
-		//TODO
+		Put_Proc_Back(argv[1]);
+		return 1;
 	}
+	if(!strcmp(argv[0], "fg"))
+	{
+		Put_Proc_Front(argv[1]);
+		return 1;
+	}
+	return 0;
 	return 0;
 }
 
@@ -190,6 +215,7 @@ int parseline(char *buf, char **argv)
 }
 
 
+
 inline void * Assign_to_Simpcb( pid_t pid, pid_t ppid, unsigned short stat, unsigned short \
 		running, char *name)
 {
@@ -209,9 +235,113 @@ void test_handler(int signum)
 {
 	Pcb* temp_pcb=g_pcb->next;
 	while(temp_pcb!=NULL){
-		printf("pid=%d, ppid=%d, name=%s, stat=%d, running=%d\n", temp_pcb->pid, temp_pcb->ppid, temp_pcb->name \ 
-				,temp_pcb->stat, temp_pcb->running);
-			temp_pcb=temp_pcb->next;
+	printf("pid=%d, ppid=%d, name=%s, stat=%d, running=%d\n", temp_pcb->pid, temp_pcb->ppid, temp_pcb->name \ 
+			,temp_pcb->stat, temp_pcb->running);
+		temp_pcb=temp_pcb->next;
+	}
+}
+
+//view the jobs in the bg.
+void View_Jobs()
+{
+	Pcb * temp_pcb=g_pcb->next;
+	while(temp_pcb!=NULL){
+
+#ifdef DEBUG
+		printf("the stat=%d\t and the running=%d\n", temp_pcb->stat, temp_pcb->running );
+#endif
+		if(0==temp_pcb->stat)
+		{
+			if(kill(temp_pcb->pid, 0)<0)
+				temp_pcb->running=2;
+			printf("pid=%d, ppid=%d, name=%s, stat=%d, ", temp_pcb->pid, temp_pcb->ppid, temp_pcb->name \ 
+				,temp_pcb->stat);
+			switch(temp_pcb->running)
+			{
+				case 0:printf("sleeping(stopped)\n");break;
+				case 1:printf("running\n");break;
+				case 2:printf("end\n");break;
+			}
+		}
+		temp_pcb=temp_pcb->next;
+	}
+}
+
+//to override a part of signals
+void SIGCHLD_handler(int signum)
+{
+    while(waitpid(-1, 0, WNOHANG)>0)
+		;
+	return;
+}
+//to override a part of signals
+void SIGTSTP_handler(int signum)
+{
+	Pcb* temp_pcb=g_pcb->next,*pre_pcb=g_pcb;
+	while(temp_pcb!=NULL)
+	{
+		kill(temp_pcb->pid, SIGTSTP);
+		temp_pcb->running =0;
+		printf("job %d fell asleep by signal SIGTSTP caused by ctrl+Z\n", temp_pcb->pid);
+		temp_pcb=temp_pcb->next;
+	}
+}
+//to override a part of signals
+void SIGINT_handler(int signum)
+{
+	Pcb* temp_pcb=g_pcb->next,*pre_pcb=g_pcb;
+	while(temp_pcb!=NULL)
+	{
+		kill(temp_pcb->pid, SIGINT);
+		printf("job %d end by signal SIGINT caused by ctrl+C\n", temp_pcb->pid);
+		pre_pcb->next=temp_pcb->next;
+		free(temp_pcb);
+		temp_pcb=pre_pcb->next;
+	}
+
+}
+//to "fg" the proc
+void Put_Proc_Front(char *pid)
+{
+	int pid_tru=atoi(pid);
+	Pcb *temp_pcb=g_pcb->next;
+	int status, flag=0;
+	while(temp_pcb!=NULL)
+	{
+		if(temp_pcb->pid==pid_tru)
+		{
+			kill(pid_tru, SIGCONT );
+			waitpid(pid_tru,&status, 0 );
+			flag=1;
+			break;
+		}
+		temp_pcb=temp_pcb->next; 
+	}
+	if(!flag){
+		printf("no pid %d  match, please check your input\n", pid_tru );
+	}
+}
+
+
+//to "bg" the proc
+void Put_Proc_Back(char *pid)
+{
+	int pid_tru=atoi(pid);
+	Pcb *temp_pcb=g_pcb->next;
+	int status, flag=0;
+	while(temp_pcb!=NULL)
+	{
+		if(temp_pcb->pid==pid_tru)
+		{
+			kill(pid_tru, SIGCONT );
+			temp_pcb->running=1;
+			flag=1;
+			break;
+		}
+		temp_pcb=temp_pcb->next; 
+	}
+	if(!flag){
+		printf("no pid %d  match, please check your input\n", pid_tru );
 	}
 
 }
