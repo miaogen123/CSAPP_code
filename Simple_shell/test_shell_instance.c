@@ -13,7 +13,5 @@ int main(void)
 		printf("i'm  here\n");
 		sleep(1);
 		i--;
-
 	}
-
 }
