@@ -30,3 +30,15 @@ void *mem_sbrk(int incr)
 	mem_brk+=incr;
 	return (void*)old_brk;
 }
+inline const void* Return_Head()
+{
+	return mem_heap;
+}
+inline const void* Return_Tail()
+{
+	return  mem_brk;
+}
+inline const void* Return_MaxAddr()
+{
+	return  mem_max_addr;
+}

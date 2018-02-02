@@ -1,3 +1,4 @@
+#pragma once
 #include"memlib.c"
 
 //Basic constant and macors
@@ -27,7 +28,7 @@ static void* extend_heap(size_t words);
 void mm_free(void* bp);
 static void* coalesce(void *bp);
 void* mm_malloc(size_t size);
-static void* find_fit(size_t, asize);
+static void* find_fit(size_t asize);
 static void place(void*bp, size_t size);
 
 
@@ -129,3 +130,44 @@ void* mm_malloc(size_t size)
 	place(bp, asize);
 	return bp;
 }
+
+
+//below is the prototype in the book P603, which confused me
+//the requirement is that accomplish a first match
+//but there is no ways to access the first bytes pointer, it's tatic.
+//to make it, i modify the memlib.c and add some interface.
+static void* find_fit(size_t asize)
+{
+	char *head=Return_Head;
+	char *tail=Return_Tail;
+	while(GET_ALLOC(HDRP(head))||GET_SIZE(HDRP(head))<asize ){   // when allocated || less than asize, move to the next
+		head+=GET_SIZE(HDRP(head));
+		if(head>tail){
+			printf("there is no suitable size\n");
+			return NULL;
+		}
+	}
+	return (void *)head;
+
+}
+static void place(void*bp, size_t size)
+{
+	char *hdrp=HDRP(bp);
+	size_t pre_size=GET_SIZE(hdrp);
+
+	if(pre_size-size<2*DSIZE){
+		PUT(hdrp, PACK(pre_size,1));
+		PUT(pre_size, PACK(pre_size,1));
+
+	}
+
+	char *ftrp=FTRP(bp);
+	PUT(hdrp, PACK(size, 1));
+	hdrp+=size;
+	PUT(hdrp-WSIZE, PACK(size, 1));
+
+	size_t new_size=(pre_size-size)&~7;
+	PUT(hdrp, PACK(new_size, 0));
+	PUT(hdrp+new_size-2*WSIZE, PACK(new_size, 0));
+}
+
