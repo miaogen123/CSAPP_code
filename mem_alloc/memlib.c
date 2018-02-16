@@ -5,7 +5,7 @@
 #include<sys/types.h>
 #include<unistd.h>
 
-#define MAX_HEAP 100
+#define MAX_HEAP 8096
 
 static char *mem_heap; //the first byte of heap
 static char *mem_brk;  //the last byte plus 1
@@ -22,6 +22,12 @@ void mem_init(void)
 void *mem_sbrk(int incr)
 {
 	char *old_brk=mem_brk;
+	printf("incr=%d\n", incr);
+	if(mem_brk==NULL)
+		printf("mem_brk is NULL\n");
+	printf("mem_brk=%p\n", mem_brk);
+	printf("mem_max_addr=%p\n", mem_max_addr);
+	printf("new_addr=%p\n", mem_brk+incr);
 	if((incr<0)||((mem_brk+incr)>mem_max_addr)){
 		errno=ENOMEM;
 		fprintf(stderr, "ERROR :mem_sbrk failed. ran out of memory\n");
